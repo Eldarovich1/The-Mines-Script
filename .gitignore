@@ -16,7 +16,7 @@ local rootPart  = character:WaitForChild("HumanoidRootPart")
 -- 1. СКОРОСТЬ
 -- ══════════════════════════════════════════════
 local WALK_SPEED     = 21
-local SEEK_SPEED     = 28
+local SEEK_SPEED     = 25
 local SEEK_GONE_DIST = 280
 local activeSeeks    = {}
 local seekActive     = false
