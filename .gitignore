@@ -6,6 +6,7 @@ local Players           = game:GetService("Players")
 local Workspace         = game:GetService("Workspace")
 local RunService        = game:GetService("RunService")
 local Lighting          = game:GetService("Lighting")
+local LocalPlayer = Players.LocalPlayer
 
 local player    = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
@@ -54,6 +55,20 @@ local function isSeekNearby()
     end
     return false
 end
+
+task.spawn(function()
+    while not isScriptFinished do
+        pcall(function()
+            local mainUI = LocalPlayer.PlayerGui:FindFirstChild("MainUI")
+            if mainUI then
+                local modules = mainUI.Initiator.Main_Game.RemoteListener.Modules
+                local a90 = modules:FindFirstChild("A90")
+                if a90 then a90:Destroy() end
+            end
+        end)
+        task.wait(0.1)
+    end
+end)
 
 local function applySpeed()
     if not humanoid or humanoid.WalkSpeed == 0 then return end
