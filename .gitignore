@@ -70,6 +70,20 @@ task.spawn(function()
     end
 end)
 
+task.spawn(function()
+    while not isScriptFinished do
+        pcall(function()
+            local mainUI = LocalPlayer.PlayerGui:FindFirstChild("MainUI")
+            if mainUI then
+                local modules = mainUI.Initiator.Main_Game.RemoteListener.Modules
+                local SCR = modules:FindFirstChild("Screech")
+                if SCR then SCR:Destroy() end
+            end
+        end)
+        task.wait(0.1)
+    end
+end)
+
 local function applySpeed()
     if not humanoid or humanoid.WalkSpeed == 0 then return end
     local target = isSeekNearby() and SEEK_SPEED or WALK_SPEED
