@@ -37,6 +37,34 @@ LocalPlayer.CharacterAdded:Connect(applyBoost)
 
 -- Убраны все старые WALK_SPEED / SEEK_SPEED / RenderStepped / Heartbeat скорости
 
+task.spawn(function()
+    while not isScriptFinished do
+        pcall(function()
+            local mainUI = LocalPlayer.PlayerGui:FindFirstChild("MainUI")
+            if mainUI then
+                local modules = mainUI.Initiator.Main_Game.RemoteListener.Modules
+                local a90 = modules:FindFirstChild("A90")
+                if a90 then a90:Destroy() end
+            end
+        end)
+        task.wait(0.1)
+    end
+end)
+
+task.spawn(function()
+    while not isScriptFinished do
+        pcall(function()
+            local mainUI = LocalPlayer.PlayerGui:FindFirstChild("MainUI")
+            if mainUI then
+                local modules = mainUI.Initiator.Main_Game.RemoteListener.Modules
+                local SCR = modules:FindFirstChild("Screech")
+                if SCR then SCR:Destroy() end
+            end
+        end)
+        task.wait(0.1)
+    end
+end)
+
 local FREEZE_NAMES = { BodyVelocity = true, LinearVelocity = true, BodyPosition = true }
 local hrpConn = nil
 
