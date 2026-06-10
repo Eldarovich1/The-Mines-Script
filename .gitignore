@@ -1,12 +1,12 @@
 -- ██████████████████████████████████████████████
---   DOORS: THE MINES — ESP v8.9.2 (SOFT SPEED +15 + FAST ESP)
+--   DOORS: THE MINES — ESP v8.9.1 (LOW CPU + DOOR FIX + PERMANENT HIGHLIGHTS)
 -- ██████████████████████████████████████████████
 
 local Players           = game:GetService("Players")
 local Workspace         = game:GetService("Workspace")
 local RunService        = game:GetService("RunService")
 local Lighting          = game:GetService("Lighting")
-local LocalPlayer       = Players.LocalPlayer
+local LocalPlayer = Players.LocalPlayer
 
 local player    = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
@@ -14,28 +14,47 @@ local humanoid  = character:WaitForChild("Humanoid")
 local rootPart  = character:WaitForChild("HumanoidRootPart")
 
 -- ══════════════════════════════════════════════
--- 1. SOFT SPEED +15
+-- 1. СКОРОСТЬ
 -- ══════════════════════════════════════════════
-local BOOST = 5
+local WALK_SPEED     = 21
+local SEEK_SPEED     = 25
+local SEEK_GONE_DIST = 280
+local activeSeeks    = {}
+local seekActive     = false
 
-local function applyBoost()
-    local char = LocalPlayer.Character
-    if not char then return end
-    
-    char:SetAttribute("SpeedBoostExtra", BOOST)
-    
-    local hum = char:FindFirstChild("Humanoid")
-    if hum and hum.WalkSpeed > 0 then
-        hum.WalkSpeed = 16 + BOOST  -- базовые 16 + 15 = 31
+local FREEZE_NAMES   = { BodyVelocity = true, LinearVelocity = true, BodyPosition = true }
+
+local hrpConn = nil
+local function startHRPWatch()
+    if hrpConn then return end
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    hrpConn = hrp.ChildAdded:Connect(function(child)
+        if FREEZE_NAMES[child.Name] or FREEZE_NAMES[child.ClassName] then
+            task.defer(function()
+                if child and child.Parent then child:Destroy() end
+            end)
+        end
+    end)
+end
+
+local function stopHRPWatch()
+    if hrpConn then hrpConn:Disconnect(); hrpConn = nil end
+end
+
+local function isSeekNearby()
+    local root = character:FindFirstChild("HumanoidRootPart")
+    if not root then return false end
+    for seekObj in pairs(activeSeeks) do
+        if seekObj and seekObj.Parent then
+            local part = seekObj:IsA("Model") and (seekObj.PrimaryPart or seekObj:FindFirstChildWhichIsA("BasePart")) or seekObj
+            if part and (part.Position - root.Position).Magnitude < SEEK_GONE_DIST then return true end
+        else
+            activeSeeks[seekObj] = nil
+        end
     end
+    return false
 end
-
-if LocalPlayer.Character then
-    applyBoost()
-end
-LocalPlayer.CharacterAdded:Connect(applyBoost)
-
--- Убраны все старые WALK_SPEED / SEEK_SPEED / RenderStepped / Heartbeat скорости
 
 task.spawn(function()
     while not isScriptFinished do
@@ -65,43 +84,134 @@ task.spawn(function()
     end
 end)
 
-local FREEZE_NAMES = { BodyVelocity = true, LinearVelocity = true, BodyPosition = true }
-local hrpConn = nil
+local function applySpeed()
+    if not humanoid or humanoid.WalkSpeed == 0 then return end
+    local target = isSeekNearby() and SEEK_SPEED or WALK_SPEED
+    if humanoid.WalkSpeed ~= target then
+        humanoid.WalkSpeed = target
+    end
+end
 
-local function startHRPWatch()
-    if hrpConn then return end
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    hrpConn = hrp.ChildAdded:Connect(function(child)
-        if FREEZE_NAMES[child.Name] or FREEZE_NAMES[child.ClassName] then
-            task.defer(function()
-                if child and child.Parent then child:Destroy() end
+RunService.Heartbeat:Connect(function()
+    if seekActive and humanoid then
+        humanoid.WalkSpeed = SEEK_SPEED
+    end
+end)
+
+-- ══════════════════════════════════════════════
+-- 2. LOW CPU ОПТИМИЗАЦИЯ
+-- ══════════════════════════════════════════════
+local lastScan = 0
+local highlightedObjects = {}
+local highlightIsMonster = {}
+local lockerHighlights   = {}
+local highlightsHidden   = false
+
+local function hideItemHighlights()
+    if highlightsHidden then return end
+    highlightsHidden = true
+    local list = {}
+    for target, h in pairs(highlightedObjects) do
+        if not highlightIsMonster[target] and h and h.Parent then
+            table.insert(list, {h = h, isLocker = false, anchor = target})
+        end
+    end
+    for t, h in pairs(lockerHighlights) do
+        if h and h.Parent then
+            table.insert(list, {h = h, isLocker = true, anchor = t})
+        end
+    end
+    task.spawn(function()
+        for i, item in ipairs(list) do
+            if not highlightsHidden then break end
+            pcall(function()
+                if item.h then item.h.Enabled = false end
+                if item.anchor then
+                    local bb = item.anchor:FindFirstChild(item.isLocker and "LockerLabel" or "ItemLabel")
+                    if bb then bb.Enabled = false end
+                end
             end)
+            if i % 15 == 0 then RunService.Heartbeat:Wait() end
         end
     end)
 end
 
-local function stopHRPWatch()
-    if hrpConn then hrpConn:Disconnect(); hrpConn = nil end
+local function showItemHighlights()
+    if not highlightsHidden then return end
+    highlightsHidden = false
+    local list = {}
+    for target, h in pairs(highlightedObjects) do
+        if not highlightIsMonster[target] and h and h.Parent then
+            table.insert(list, {h = h, isLocker = false, anchor = target})
+        end
+    end
+    for t, h in pairs(lockerHighlights) do
+        if h and h.Parent then
+            table.insert(list, {h = h, isLocker = true, anchor = t})
+        end
+    end
+    task.spawn(function()
+        for i, item in ipairs(list) do
+            if highlightsHidden then break end
+            pcall(function()
+                if item.h then item.h.Enabled = true end
+                if item.anchor then
+                    local bb = item.anchor:FindFirstChild(item.isLocker and "LockerLabel" or "ItemLabel")
+                    if bb then bb.Enabled = true end
+                end
+            end)
+            if i % 25 == 0 then task.wait() end
+        end
+    end)
 end
 
+local function startSeekOverride()
+    if seekActive then return end
+    seekActive = true
+    startHRPWatch()
+    if humanoid then humanoid.WalkSpeed = SEEK_SPEED end
+    hideItemHighlights()
+end
+
+local function stopSeekOverride()
+    if not seekActive then return end
+    seekActive = false
+    stopHRPWatch()
+    showItemHighlights()
+    applySpeed()
+end
+
+task.spawn(function()
+    while true do
+        task.wait(0.3)
+        if seekActive and not isSeekNearby() then
+            stopSeekOverride()
+        elseif not seekActive then
+            applySpeed()
+        end
+    end
+end)
+
 -- ══════════════════════════════════════════════
--- 2. FULLBRIGHT + КАМЕРА
+-- 3. FULLBRIGHT + КАМЕРА
 -- ══════════════════════════════════════════════
 local camera = Workspace.CurrentCamera
 
 local function watchCamera()
     camera:GetPropertyChangedSignal("CameraType"):Connect(function()
-        if camera.CameraType == Enum.CameraType.Scriptable then
+        if seekActive and camera.CameraType == Enum.CameraType.Scriptable then
             task.defer(function()
-                camera.CameraType = Enum.CameraType.Custom
+                if seekActive then camera.CameraType = Enum.CameraType.Custom end
             end)
         end
     end)
 end
 watchCamera()
 
+local fullbrightLock = false
 local function applyFullbright()
+    if fullbrightLock then return end
+    fullbrightLock = true
     Lighting.Brightness = 2
     Lighting.ClockTime = 14
     Lighting.FogEnd = 100000
@@ -109,12 +219,10 @@ local function applyFullbright()
     Lighting.GlobalShadows = false
     Lighting.Ambient = Color3.fromRGB(255,255,255)
     Lighting.OutdoorAmbient = Color3.fromRGB(255,255,255)
-    
     for _, e in pairs(Lighting:GetChildren()) do
-        if e:IsA("PostEffect") or e:IsA("Sky") or e:IsA("Atmosphere") then 
-            e:Destroy() 
-        end
+        if e:IsA("PostEffect") or e:IsA("Sky") or e:IsA("Atmosphere") then e:Destroy() end
     end
+    fullbrightLock = false
 end
 applyFullbright()
 
@@ -125,7 +233,7 @@ Lighting.ChildAdded:Connect(function(c)
 end)
 
 -- ══════════════════════════════════════════════
--- 3. СПИСОК ЦЕЛЕЙ
+-- 4. СПИСОК ЦЕЛЕЙ
 -- ══════════════════════════════════════════════
 local targets = {
     ["Door"]                  = { Color = Color3.fromRGB(255, 120,  0), Name = "🚪 Дверь" },
@@ -166,15 +274,13 @@ for k, v in pairs(targets) do
     if v.isMon then MONSTER_NAMES[k] = true end
 end
 
-local highlightedObjects = {}
-local highlightIsMonster = {}
-local lockerHighlights   = {}
 local notifiedMonsters = {}
-local activeSeeks = {}
+local objectQueue = {}
+local monsterQueue = {}
 local rushAmbushCount = 0
 
 -- ══════════════════════════════════════════════
--- 4. BILLBOARD + HIGHLIGHT + ШКАФЫ
+-- 5. BILLBOARD + HIGHLIGHT + ШКАФЫ
 -- ══════════════════════════════════════════════
 local function createBillboard(anchorPart, itemName, color, isMonster)
     if not anchorPart or not anchorPart.Parent or anchorPart:FindFirstChild("ItemLabel") then return end
@@ -184,7 +290,7 @@ local function createBillboard(anchorPart, itemName, color, isMonster)
     bb.Size = UDim2.new(0, isMonster and 220 or 170, 0, isMonster and 46 or 36)
     bb.StudsOffset = Vector3.new(0, isMonster and 5 or 2.5, 0)
     bb.AlwaysOnTop = true
-    bb.MaxDistance = 0
+    bb.MaxDistance = 0                    -- ← ВЕЧНО ВИДНО
     bb.LightInfluence = 0
 
     local bg = Instance.new("Frame", bb)
@@ -216,6 +322,11 @@ local function addHighlight(target, color, itemName, isMonster)
     if not target or not target.Parent then return end
     if character and target:IsDescendantOf(character) then return end
 
+    -- Убрано ограничение по расстоянию для предметов
+    if not isMonster then
+        -- дистанция больше не проверяется
+    end
+
     if not highlightedObjects[target] then
         local h = Instance.new("Highlight")
         h.Parent = target
@@ -224,6 +335,7 @@ local function addHighlight(target, color, itemName, isMonster)
         h.OutlineColor = Color3.fromRGB(255,255,255)
         h.OutlineTransparency = 0
         h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        if seekActive and not isMonster then h.Enabled = false end
         highlightedObjects[target] = h
         highlightIsMonster[target] = isMonster or false
     end
@@ -233,6 +345,10 @@ local function addHighlight(target, color, itemName, isMonster)
 
     if anchor then
         createBillboard(anchor, itemName, color, isMonster)
+        if seekActive and not isMonster then
+            local bb = anchor:FindFirstChild("ItemLabel")
+            if bb then bb.Enabled = false end
+        end
     end
 end
 
@@ -309,7 +425,7 @@ local function onRushAmbushSpawn(obj)
 end
 
 -- ══════════════════════════════════════════════
--- 5. ОБРАБОТКА
+-- 6. ОБРАБОТКА ОБЪЕКТОВ
 -- ══════════════════════════════════════════════
 local function isRealDoor(obj)
     local parent = obj.Parent
@@ -364,16 +480,20 @@ local function handleMonster(obj)
     
     if data.isSee then
         activeSeeks[obj] = true
-        startHRPWatch()
-        queueWarning("👁️ SEEK ГОНИТСЯ!", "БЕГИ!")
+        startSeekOverride()
+        queueWarning("👁️ SEEK ГОНИТСЯ!", "БЕГИ! Скорость "..SEEK_SPEED)
         obj.AncestryChanged:Connect(function(_,p)
             if p == nil then
                 activeSeeks[obj] = nil
+                if not next(activeSeeks) then stopSeekOverride() end
             end
         end)
-    elseif data.isRsh or data.isAmb then
+    elseif data.isRsh then
         onRushAmbushSpawn(obj)
-        queueWarning(data.isRsh and "💨 RUSH!" or "🔄 AMBUSH!", "Прячься в шкаф!")
+        queueWarning("💨 RUSH!", "Прячься в шкаф!")
+    elseif data.isAmb then
+        onRushAmbushSpawn(obj)
+        queueWarning("🔄 AMBUSH!", "Оставайся в шкафу!")
     elseif data.isGrm then
         queueWarning("🪨 GRUMBLE!", "Уйди с пути!")
     elseif data.isGig then
@@ -382,7 +502,7 @@ local function handleMonster(obj)
 end
 
 -- ══════════════════════════════════════════════
--- 6. GUI ПРЕДУПРЕЖДЕНИЙ
+-- 7. GUI ПРЕДУПРЕЖДЕНИЙ
 -- ══════════════════════════════════════════════
 local playerGui = player:WaitForChild("PlayerGui")
 local screenGui = Instance.new("ScreenGui", playerGui)
@@ -438,50 +558,78 @@ task.spawn(function()
 end)
 
 -- ══════════════════════════════════════════════
--- 7. СКАНИРОВАНИЕ (убраны очереди для максимальной скорости появления)
+-- 8. ОЧЕРЕДЬ + СКАНИРОВАНИЕ
 -- ══════════════════════════════════════════════
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        if #monsterQueue > 0 then
+            local batch = monsterQueue
+            monsterQueue = {}
+            for _, obj in ipairs(batch) do
+                pcall(handleMonster, obj)
+            end
+        end
+        if not seekActive then
+            for i = 1, 8 do
+                local obj = table.remove(objectQueue, 1)
+                if obj then pcall(processObject, obj) else break end
+            end
+        end
+    end
+end)
+
 Workspace.DescendantAdded:Connect(function(desc)
     if MONSTER_NAMES[desc.Name] then
-        task.defer(handleMonster, desc)
-    else
-        task.defer(processObject, desc)
+        table.insert(monsterQueue, desc)
+    elseif not seekActive then
+        table.insert(objectQueue, desc)
     end
 end)
 
 local function scanObjects()
-    local all = Workspace:GetDescendants()
-    for _, obj in ipairs(all) do
-        if MONSTER_NAMES[obj.Name] then
-            pcall(handleMonster, obj)
-        else
-            pcall(processObject, obj)
+    if seekActive or tick() - lastScan < 15 then return end
+    lastScan = tick()
+    task.spawn(function()
+        local all = Workspace:GetDescendants()
+        for i, obj in ipairs(all) do
+            if seekActive then break end
+            if MONSTER_NAMES[obj.Name] then
+                pcall(handleMonster, obj)
+            else
+                pcall(processObject, obj)
+            end
+            if i % 120 == 0 then task.wait(0.03) end
         end
-    end
-    showLockers() -- сразу показываем шкафы
+    end)
 end
 
 -- ══════════════════════════════════════════════
--- 8. РЕСПАВН
+-- 9. РЕСПАВН
 -- ══════════════════════════════════════════════
 player.CharacterAdded:Connect(function(newChar)
     for _, h in pairs(highlightedObjects) do
         if h and h.Parent then h:Destroy() end
     end
     hideLockers()
-    stopHRPWatch()
+    stopSeekOverride()
     
     highlightedObjects = {}
     highlightIsMonster = {}
     notifiedMonsters = {}
     activeSeeks = {}
+    objectQueue = {}
+    monsterQueue = {}
     rushAmbushCount = 0
     
     character = newChar
     humanoid  = character:WaitForChild("Humanoid")
     rootPart  = character:WaitForChild("HumanoidRootPart")
+    camera    = Workspace.CurrentCamera
     
-    task.wait(0.5)
-    applyBoost()
+    watchCamera()
+    task.wait(1)
+    applySpeed()
     applyFullbright()
     scanObjects()
 end)
@@ -489,16 +637,17 @@ end)
 -- ЗАПУСК
 task.spawn(function()
     while true do
-        task.wait(12)
-        applyBoost()
+        task.wait(15)
+        scanObjects()
+        applySpeed()
         applyFullbright()
     end
 end)
 
 scanObjects()
-applyBoost()
+applySpeed()
 applyFullbright()
 
-print("✅ DOORS Mines ESP v8.9.2 (Soft Speed +15 + Fast ESP) загружен!")
-print("   Скорость: ~31 (мягкий буст +15)")
-print("   ESP теперь появляется почти мгновенно")
+print("✅ DOORS Mines ESP v8.9.1 (LOW CPU + PERMANENT HIGHLIGHTS) загружен!")
+print("   Скорость на Сике: " .. SEEK_SPEED)
+print("   Все предметы теперь хайлайтятся вечно")
